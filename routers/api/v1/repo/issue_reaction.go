@@ -51,19 +51,9 @@ func GetIssueCommentReactions(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	comment, err := issues_model.GetCommentByID(ctx, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
 		ctx.APIErrorAuto(err)
-		return
-	}
-
-	if err := comment.LoadIssue(ctx); err != nil {
-		ctx.APIErrorInternal(err)
-		return
-	}
-
-	if comment.Issue.RepoID != ctx.Repo.Repository.ID {
-		ctx.APIErrorNotFound()
 		return
 	}
 
@@ -184,19 +174,9 @@ func DeleteIssueCommentReaction(ctx *context.APIContext) {
 }
 
 func changeIssueCommentReaction(ctx *context.APIContext, form api.EditReactionOption, isCreateType bool) {
-	comment, err := issues_model.GetCommentByID(ctx, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
 		ctx.APIErrorAuto(err)
-		return
-	}
-
-	if err = comment.LoadIssue(ctx); err != nil {
-		ctx.APIErrorInternal(err)
-		return
-	}
-
-	if comment.Issue.RepoID != ctx.Repo.Repository.ID {
-		ctx.APIErrorNotFound()
 		return
 	}
 

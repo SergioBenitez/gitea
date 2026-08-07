@@ -254,7 +254,7 @@ func CreatePullReviewCommentReply(ctx *context.APIContext) {
 
 	opts := web.GetForm(ctx).(*api.CreatePullReviewCommentReplyOptions)
 
-	parent := getPullReviewCommentToResolve(ctx)
+	parent := getPullReviewCodeComment(ctx)
 	if parent == nil {
 		return
 	}
@@ -359,7 +359,7 @@ func UnresolvePullReviewComment(ctx *context.APIContext) {
 }
 
 func updatePullReviewCommentResolve(ctx *context.APIContext, isResolve bool) {
-	comment := getPullReviewCommentToResolve(ctx)
+	comment := getPullReviewCodeComment(ctx)
 	if comment == nil {
 		return
 	}
@@ -382,8 +382,8 @@ func updatePullReviewCommentResolve(ctx *context.APIContext, isResolve bool) {
 	ctx.Status(http.StatusNoContent)
 }
 
-func getPullReviewCommentToResolve(ctx *context.APIContext) *issues_model.Comment {
-	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"))
+func getPullReviewCodeComment(ctx *context.APIContext) *issues_model.Comment {
+	comment, err := issues_model.GetCodeCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
 		ctx.APIErrorAuto(err)
 		return nil
@@ -391,11 +391,6 @@ func getPullReviewCommentToResolve(ctx *context.APIContext) *issues_model.Commen
 
 	if !comment.Issue.IsPull {
 		ctx.APIError(http.StatusBadRequest, "comment does not belong to a pull request")
-		return nil
-	}
-
-	if comment.Type != issues_model.CommentTypeCode {
-		ctx.APIError(http.StatusBadRequest, "comment is not a review comment")
 		return nil
 	}
 
@@ -741,8 +736,7 @@ func prepareSingleReview(ctx *context.APIContext) (*issues_model.Review, *issues
 		return nil, nil, true
 	}
 
-	// make sure that the user has access to this review if it is pending
-	if review.Type == issues_model.ReviewTypePending && review.ReviewerID != ctx.Doer.ID && !ctx.Doer.IsAdmin {
+	if !issues_model.IsReviewVisibleToUser(review, ctx.Doer) {
 		ctx.APIErrorNotFound()
 		return nil, nil, true
 	}

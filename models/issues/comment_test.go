@@ -4,6 +4,7 @@
 package issues_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -12,8 +13,10 @@ import (
 	repo_model "gitea.dev/models/repo"
 	"gitea.dev/models/unittest"
 	user_model "gitea.dev/models/user"
+	"gitea.dev/modules/optional"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateComment(t *testing.T) {
@@ -79,21 +82,60 @@ func Test_UpdateCommentAttachment(t *testing.T) {
 }
 
 func TestFetchCodeComments(t *testing.T) {
-	assert.NoError(t, unittest.PrepareTestDatabase())
-
+	require.NoError(t, unittest.PrepareTestDatabase())
 	issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 2})
-	user := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
-	res, err := issues_model.FetchCodeComments(t.Context(), issue, user, false)
-	assert.NoError(t, err)
-	assert.Contains(t, res, "README.md")
-	assert.Contains(t, res["README.md"], int64(4))
-	assert.Len(t, res["README.md"][4], 1)
-	assert.Equal(t, int64(4), res["README.md"][4][0].ID)
+	reviewer := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 1})
+	reader := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
 
-	user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
-	res, err = issues_model.FetchCodeComments(t.Context(), issue, user2, false)
-	assert.NoError(t, err)
-	assert.Len(t, res, 1)
+	comments, err := issues_model.FetchCodeComments(t.Context(), issue, reviewer, false)
+	require.NoError(t, err)
+	assert.Contains(t, comments["README.md"], int64(4))
+	assert.Contains(t, comments["README.md"], int64(-4))
+
+	comments, err = issues_model.FetchCodeComments(t.Context(), issue, reader, false)
+	require.NoError(t, err)
+	assert.NotContains(t, comments["README.md"], int64(4))
+	assert.Contains(t, comments["README.md"], int64(-4))
+
+	_, err = db.GetEngine(t.Context()).ID(4).Cols("review_id").Update(&issues_model.Comment{ReviewID: 999})
+	require.NoError(t, err)
+	comments, err = issues_model.FetchCodeComments(t.Context(), issue, reviewer, false)
+	require.NoError(t, err)
+	assert.NotContains(t, comments["README.md"], int64(4))
+	assert.Contains(t, comments["README.md"], int64(-4))
+}
+
+func TestCommentVisibility(t *testing.T) {
+	require.NoError(t, unittest.PrepareTestDatabase())
+	assertVisible := func(name string, user *user_model.User, expected bool) {
+		comments, err := issues_model.FindComments(t.Context(), &issues_model.FindCommentsOptions{
+			IssueID: 2, Type: issues_model.CommentTypeCode, VisibleToUser: optional.Some(user),
+		})
+		require.NoError(t, err)
+		assert.True(t, slices.ContainsFunc(comments, func(comment *issues_model.Comment) bool { return comment.ID == 5 }), name)
+		inCollection := slices.ContainsFunc(comments, func(comment *issues_model.Comment) bool { return comment.ID == 4 })
+		_, err = issues_model.GetCommentWithRepoID(t.Context(), 1, 4, user)
+		assert.Equal(t, expected, inCollection, name)
+		assert.Equal(t, expected, err == nil, name)
+		if !expected {
+			assert.True(t, issues_model.IsErrCommentNotExist(err), name)
+		}
+	}
+
+	assertVisible("anonymous", nil, false)
+	assertVisible("reader", &user_model.User{ID: 2}, false)
+	assertVisible("reviewer", &user_model.User{ID: 1}, true)
+	assertVisible("administrator", &user_model.User{ID: 2, IsAdmin: true}, true)
+	_, err := issues_model.GetCommentWithRepoID(t.Context(), 1, 5, nil)
+	require.NoError(t, err)
+
+	_, err = db.GetEngine(t.Context()).ID(4).Cols("type").Update(&issues_model.Review{Type: issues_model.ReviewTypeComment})
+	require.NoError(t, err)
+	assertVisible("submitted", &user_model.User{ID: 2}, true)
+
+	_, err = db.GetEngine(t.Context()).ID(4).Cols("review_id").Update(&issues_model.Comment{ReviewID: 999})
+	require.NoError(t, err)
+	assertVisible("orphaned", &user_model.User{IsAdmin: true}, false)
 }
 
 func TestAsCommentType(t *testing.T) {

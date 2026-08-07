@@ -33,7 +33,8 @@ func TestContentHistory(t *testing.T) {
 	h1, _ := issues_model.GetIssueContentHistoryByID(dbCtx, 1)
 	assert.EqualValues(t, 1, h1.ID)
 
-	m, _ := issues_model.QueryIssueContentHistoryEditedCountMap(dbCtx, 10)
+	assert.NoError(t, db.Insert(dbCtx, &issues_model.Comment{ID: 100, IssueID: 10}))
+	m, _ := issues_model.QueryIssueContentHistoryEditedCountMap(dbCtx, 10, nil)
 	assert.Equal(t, 3, m[0])
 	assert.Equal(t, 5, m[100])
 
@@ -48,9 +49,9 @@ func TestContentHistory(t *testing.T) {
 	}
 	_ = db.GetEngine(dbCtx).Sync(&User{})
 
-	list1, _ := issues_model.FetchIssueContentHistoryList(dbCtx, 10, 0)
+	list1, _ := issues_model.FetchIssueContentHistoryList(dbCtx, 10, 0, nil)
 	assert.Len(t, list1, 3)
-	list2, _ := issues_model.FetchIssueContentHistoryList(dbCtx, 10, 100)
+	list2, _ := issues_model.FetchIssueContentHistoryList(dbCtx, 10, 100, nil)
 	assert.Len(t, list2, 5)
 
 	hasHistory1, _ := issues_model.HasIssueContentHistory(dbCtx, 10, 0)
@@ -70,9 +71,9 @@ func TestContentHistory(t *testing.T) {
 
 	// only keep 3 history revisions for comment_id=100, the first and the last should never be deleted
 	issues_model.KeepLimitedContentHistory(dbCtx, 10, 100, 3)
-	list1, _ = issues_model.FetchIssueContentHistoryList(dbCtx, 10, 0)
+	list1, _ = issues_model.FetchIssueContentHistoryList(dbCtx, 10, 0, nil)
 	assert.Len(t, list1, 3)
-	list2, _ = issues_model.FetchIssueContentHistoryList(dbCtx, 10, 100)
+	list2, _ = issues_model.FetchIssueContentHistoryList(dbCtx, 10, 100, nil)
 	assert.Len(t, list2, 3)
 	assert.EqualValues(t, 8, list2[0].HistoryID)
 	assert.EqualValues(t, 7, list2[1].HistoryID)

@@ -28,6 +28,16 @@ func TestGetReviewByID(t *testing.T) {
 	assert.True(t, issues_model.IsErrReviewNotExist(err), "IsErrReviewNotExist")
 }
 
+func TestReviewVisibility(t *testing.T) {
+	review := &issues_model.Review{Type: issues_model.ReviewTypePending, ReviewerID: 1}
+	assert.True(t, issues_model.IsReviewVisibleToUser(review, &user_model.User{ID: 1}))
+	assert.True(t, issues_model.IsReviewVisibleToUser(review, &user_model.User{ID: 2, IsAdmin: true}))
+	assert.False(t, issues_model.IsReviewVisibleToUser(review, &user_model.User{ID: 2}))
+	assert.False(t, issues_model.IsReviewVisibleToUser(review, nil))
+	review.Type = issues_model.ReviewTypeComment
+	assert.True(t, issues_model.IsReviewVisibleToUser(review, nil))
+}
+
 func TestReview_LoadAttributes(t *testing.T) {
 	assert.NoError(t, unittest.PrepareTestDatabase())
 	review := unittest.AssertExistsAndLoadBean(t, &issues_model.Review{ID: 1})

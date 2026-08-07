@@ -1045,34 +1045,55 @@ func GetCommentByID(ctx context.Context, id int64) (*Comment, error) {
 	return c, nil
 }
 
-func GetCommentWithRepoID(ctx context.Context, repoID, commentID int64) (*Comment, error) {
-	c, err := GetCommentByID(ctx, commentID)
+// GetCommentWithRepoID returns a comment in repoID if it is visible to user.
+func GetCommentWithRepoID(ctx context.Context, repoID, commentID int64, user *user_model.User) (*Comment, error) {
+	comment := new(Comment)
+	cond := builder.Eq{"comment.id": commentID, "issue.repo_id": repoID}.And(commentVisibleToUserCondition(user))
+	has, err := db.GetEngine(ctx).
+		Table("comment").
+		Join("INNER", "issue", "issue.id = comment.issue_id").
+		Where(cond).
+		Get(comment)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.LoadIssue(ctx); err != nil {
+	if !has {
+		return nil, ErrCommentNotExist{ID: commentID}
+	}
+	if err := comment.LoadIssue(ctx); err != nil {
 		return nil, err
 	}
-	if c.Issue.RepoID != repoID {
-		return nil, ErrCommentNotExist{commentID, 0}
+	return comment, nil
+}
+
+func commentVisibleToUserCondition(user *user_model.User) builder.Cond {
+	visibleReviewIDs := builder.Select("id").From("review")
+	if user == nil {
+		visibleReviewIDs = visibleReviewIDs.Where(builder.Neq{"type": ReviewTypePending})
+	} else if !user.IsAdmin {
+		visibleReviewIDs = visibleReviewIDs.Where(builder.Neq{"type": ReviewTypePending}.Or(builder.Eq{"reviewer_id": user.ID}))
 	}
-	return c, nil
+	return builder.Eq{"comment.review_id": 0}.
+		Or(builder.IsNull{"comment.review_id"}).
+		Or(builder.NotIn("comment.type", CommentTypeCode, CommentTypeReview)).
+		Or(builder.In("comment.review_id", visibleReviewIDs))
 }
 
 // FindCommentsOptions describes the conditions to Find comments
 type FindCommentsOptions struct {
 	db.ListOptions
-	RepoID      int64
-	IssueID     int64
-	ReviewID    int64
-	Since       int64
-	Before      int64
-	Line        int64
-	TreePath    string
-	Type        CommentType
-	IssueIDs    []int64
-	Invalidated optional.Option[bool]
-	IsPull      optional.Option[bool]
+	RepoID        int64
+	IssueID       int64
+	ReviewID      int64
+	Since         int64
+	Before        int64
+	Line          int64
+	TreePath      string
+	Type          CommentType
+	IssueIDs      []int64
+	Invalidated   optional.Option[bool]
+	IsPull        optional.Option[bool]
+	VisibleToUser optional.Option[*user_model.User]
 }
 
 // ToConds implements FindOptions interface
@@ -1109,6 +1130,9 @@ func (opts FindCommentsOptions) ToConds() builder.Cond {
 	}
 	if opts.IsPull.Has() {
 		cond = cond.And(builder.Eq{"issue.is_pull": opts.IsPull.Value()})
+	}
+	if opts.VisibleToUser.Has() {
+		cond = cond.And(commentVisibleToUserCondition(opts.VisibleToUser.Value()))
 	}
 	return cond
 }

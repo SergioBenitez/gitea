@@ -341,6 +341,10 @@ func ViewIssue(ctx *context.Context) {
 	ctx.Data["IsAttachmentEnabled"] = setting.Attachment.Enabled
 	upload.AddUploadContext(ctx, "comment")
 
+	if err := issue.LoadCommentsVisibleToUser(ctx, ctx.Doer); err != nil {
+		ctx.ServerError("LoadCommentsVisibleToUser", err)
+		return
+	}
 	if err := issue.LoadAttributes(ctx); err != nil {
 		ctx.ServerError("LoadAttributes", err)
 		return

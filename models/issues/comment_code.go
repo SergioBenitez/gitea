@@ -11,12 +11,25 @@ import (
 	"gitea.dev/models/renderhelper"
 	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/markup/markdown"
+	"gitea.dev/modules/optional"
 
 	"xorm.io/builder"
 )
 
 // CodeComments represents comments on code by using this structure: FILENAME -> LINE (+ == proposed; - == previous) -> COMMENTS
 type CodeComments map[string]map[int64][]*Comment
+
+// GetCodeCommentWithRepoID returns a code comment in repoID if it is visible to currentUser.
+func GetCodeCommentWithRepoID(ctx context.Context, repoID, commentID int64, currentUser *user_model.User) (*Comment, error) {
+	comment, err := GetCommentWithRepoID(ctx, repoID, commentID, currentUser)
+	if err != nil {
+		return nil, err
+	}
+	if comment.Type != CommentTypeCode {
+		return nil, ErrCommentNotExist{ID: commentID}
+	}
+	return comment, nil
+}
 
 // FetchCodeComments will return a 2d-map: ["Path"]["Line"] = Comments at line
 func FetchCodeComments(ctx context.Context, issue *Issue, currentUser *user_model.User, showOutdatedComments bool) (CodeComments, error) {
@@ -52,6 +65,9 @@ func findCodeComments(ctx context.Context, opts FindCommentsOptions, issue *Issu
 	var comments CommentList
 	if review == nil {
 		review = &Review{ID: 0}
+	}
+	if review.ID == 0 {
+		opts.VisibleToUser = optional.Some(currentUser)
 	}
 	conds := opts.ToConds()
 
@@ -103,10 +119,9 @@ func findCodeComments(ctx context.Context, opts FindCommentsOptions, issue *Issu
 
 	n := 0
 	for _, comment := range comments {
-		if re, ok := reviews[comment.ReviewID]; ok && re != nil {
-			// If the review is pending only the author can see the comments (except if the review is set)
-			if review.ID == 0 && re.Type == ReviewTypePending &&
-				(currentUser == nil || currentUser.ID != re.ReviewerID) {
+		if comment.ReviewID != 0 {
+			re, ok := reviews[comment.ReviewID]
+			if !ok || re == nil {
 				continue
 			}
 			comment.Review = re

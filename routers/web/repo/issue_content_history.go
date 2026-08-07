@@ -27,7 +27,11 @@ func GetContentHistoryOverview(ctx *context.Context) {
 		return
 	}
 
-	editedHistoryCountMap, _ := issues_model.QueryIssueContentHistoryEditedCountMap(ctx, issue.ID)
+	editedHistoryCountMap, err := issues_model.QueryIssueContentHistoryEditedCountMap(ctx, issue.ID, ctx.Doer)
+	if err != nil {
+		ctx.ServerError("QueryIssueContentHistoryEditedCountMap", err)
+		return
+	}
 	ctx.JSON(http.StatusOK, map[string]any{
 		"i18n": map[string]any{
 			"textEdited":                   ctx.Tr("repo.issues.content_history.edited"),
@@ -47,7 +51,11 @@ func GetContentHistoryList(ctx *context.Context) {
 	}
 
 	commentID := ctx.FormInt64("comment_id")
-	items, _ := issues_model.FetchIssueContentHistoryList(ctx, issue.ID, commentID)
+	items, err := issues_model.FetchIssueContentHistoryList(ctx, issue.ID, commentID, ctx.Doer)
+	if err != nil {
+		ctx.ServerError("FetchIssueContentHistoryList", err)
+		return
+	}
 
 	// render history list to HTML for frontend dropdown items: (name, value)
 	// name is HTML of "avatar + userName + userAction + timeSince"
@@ -120,9 +128,7 @@ func GetContentHistoryDetail(ctx *context.Context) {
 	historyID := ctx.FormInt64("history_id")
 	history, prevHistory, err := issues_model.GetIssueContentHistoryAndPrev(ctx, issue.ID, historyID)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, map[string]any{
-			"message": "Can not find the content history",
-		})
+		ctx.ServerError("GetIssueContentHistoryAndPrev", err)
 		return
 	}
 
@@ -130,8 +136,12 @@ func GetContentHistoryDetail(ctx *context.Context) {
 	var comment *issues_model.Comment
 	if history.CommentID != 0 {
 		var err error
-		if comment, err = issues_model.GetCommentByID(ctx, history.CommentID); err != nil {
-			log.Error("can not get comment for issue content history %v. err=%v", historyID, err)
+		if comment, err = issues_model.GetCommentWithRepoID(ctx, issue.RepoID, history.CommentID, ctx.Doer); err != nil {
+			ctx.NotFoundOrServerError("GetCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
+			return
+		}
+		if comment.IssueID != issue.ID {
+			ctx.NotFound(issues_model.ErrCommentNotExist{ID: history.CommentID})
 			return
 		}
 	}
@@ -208,8 +218,8 @@ func SoftDeleteContentHistory(ctx *context.Context) {
 		return
 	}
 	if commentID != 0 {
-		if comment, err = issues_model.GetCommentByID(ctx, commentID); err != nil {
-			log.Error("can not get comment for issue content history %v. err=%v", historyID, err)
+		if comment, err = issues_model.GetCommentWithRepoID(ctx, issue.RepoID, commentID, ctx.Doer); err != nil {
+			ctx.NotFoundOrServerError("GetCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
 			return
 		}
 		if comment.IssueID != issue.ID {

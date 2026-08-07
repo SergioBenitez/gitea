@@ -140,7 +140,7 @@ The variables in "ctx.Data" are different in each case, making this template fra
 					{{end}}
 				</div>
 			</div>
-			{{template "repo/diff/comment_form_datahandler" dict "hidden" true "reply" $comment.ReviewID "root" $ "comment" $comment}}
+			{{template "repo/diff/comment_form_datahandler" dict "hidden" true "reply" $comment.ID "root" $ "comment" $comment}}
 		</div>
 	</div>
 {{else}}

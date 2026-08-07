@@ -180,11 +180,12 @@ func ListIssueCommentsAndTimeline(ctx *context.APIContext) {
 	issue.Repo = ctx.Repo.Repository
 
 	opts := &issues_model.FindCommentsOptions{
-		ListOptions: utils.GetListOptions(ctx),
-		IssueID:     issue.ID,
-		Since:       since,
-		Before:      before,
-		Type:        issues_model.CommentTypeUndefined,
+		ListOptions:   utils.GetListOptions(ctx),
+		IssueID:       issue.ID,
+		Since:         since,
+		Before:        before,
+		Type:          issues_model.CommentTypeUndefined,
+		VisibleToUser: optional.Some(ctx.Doer),
 	}
 
 	comments, err := issues_model.FindComments(ctx, opts)
@@ -445,7 +446,7 @@ func GetIssueComment(ctx *context.APIContext) {
 	//   "404":
 	//     "$ref": "#/responses/notFound"
 
-	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
 		ctx.APIErrorAuto(err)
 		return
@@ -566,7 +567,7 @@ func EditIssueCommentDeprecated(ctx *context.APIContext) {
 }
 
 func editIssueComment(ctx *context.APIContext, form api.EditIssueCommentOption) {
-	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
 		ctx.APIErrorAuto(err)
 		return
@@ -671,7 +672,7 @@ func DeleteIssueCommentDeprecated(ctx *context.APIContext) {
 }
 
 func deleteIssueComment(ctx *context.APIContext) {
-	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
 		ctx.APIErrorAuto(err)
 		return

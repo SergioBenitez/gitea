@@ -147,6 +147,11 @@ type Review struct {
 	Comments []*Comment `xorm:"-"`
 }
 
+// IsReviewVisibleToUser reports whether user can see review.
+func IsReviewVisibleToUser(review *Review, user *user_model.User) bool {
+	return review != nil && (review.Type != ReviewTypePending || user != nil && (user.IsAdmin || user.ID == review.ReviewerID))
+}
+
 func init() {
 	db.RegisterModel(new(Review))
 }

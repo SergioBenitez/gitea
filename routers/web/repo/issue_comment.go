@@ -188,19 +188,9 @@ func NewComment(ctx *context.Context) {
 
 // UpdateCommentContent change comment of issue's content
 func UpdateCommentContent(ctx *context.Context) {
-	comment, err := issues_model.GetCommentByID(ctx, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
-		ctx.NotFoundOrServerError("GetCommentByID", issues_model.IsErrCommentNotExist, err)
-		return
-	}
-
-	if err := comment.LoadIssue(ctx); err != nil {
-		ctx.NotFoundOrServerError("LoadIssue", issues_model.IsErrIssueNotExist, err)
-		return
-	}
-
-	if comment.Issue.RepoID != ctx.Repo.Repository.ID {
-		ctx.NotFound(issues_model.ErrCommentNotExist{})
+		ctx.NotFoundOrServerError("GetCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
 		return
 	}
 
@@ -272,19 +262,9 @@ func UpdateCommentContent(ctx *context.Context) {
 
 // DeleteComment delete comment of issue
 func DeleteComment(ctx *context.Context) {
-	comment, err := issues_model.GetCommentByID(ctx, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
-		ctx.NotFoundOrServerError("GetCommentByID", issues_model.IsErrCommentNotExist, err)
-		return
-	}
-
-	if err := comment.LoadIssue(ctx); err != nil {
-		ctx.NotFoundOrServerError("LoadIssue", issues_model.IsErrIssueNotExist, err)
-		return
-	}
-
-	if comment.Issue.RepoID != ctx.Repo.Repository.ID {
-		ctx.NotFound(issues_model.ErrCommentNotExist{})
+		ctx.NotFoundOrServerError("GetCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
 		return
 	}
 
@@ -307,19 +287,9 @@ func DeleteComment(ctx *context.Context) {
 // ChangeCommentReaction create a reaction for comment
 func ChangeCommentReaction(ctx *context.Context) {
 	form := web.GetForm(ctx).(*forms.ReactionForm)
-	comment, err := issues_model.GetCommentByID(ctx, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
-		ctx.NotFoundOrServerError("GetCommentByID", issues_model.IsErrCommentNotExist, err)
-		return
-	}
-
-	if err := comment.LoadIssue(ctx); err != nil {
-		ctx.NotFoundOrServerError("LoadIssue", issues_model.IsErrIssueNotExist, err)
-		return
-	}
-
-	if comment.Issue.RepoID != ctx.Repo.Repository.ID {
-		ctx.NotFound(issues_model.ErrCommentNotExist{})
+		ctx.NotFoundOrServerError("GetCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
 		return
 	}
 
@@ -412,19 +382,9 @@ func ChangeCommentReaction(ctx *context.Context) {
 
 // GetCommentAttachments returns attachments for the comment
 func GetCommentAttachments(ctx *context.Context) {
-	comment, err := issues_model.GetCommentByID(ctx, ctx.PathParamInt64("id"))
+	comment, err := issues_model.GetCommentWithRepoID(ctx, ctx.Repo.Repository.ID, ctx.PathParamInt64("id"), ctx.Doer)
 	if err != nil {
-		ctx.NotFoundOrServerError("GetCommentByID", issues_model.IsErrCommentNotExist, err)
-		return
-	}
-
-	if err := comment.LoadIssue(ctx); err != nil {
-		ctx.NotFoundOrServerError("LoadIssue", issues_model.IsErrIssueNotExist, err)
-		return
-	}
-
-	if comment.Issue.RepoID != ctx.Repo.Repository.ID {
-		ctx.NotFound(issues_model.ErrCommentNotExist{})
+		ctx.NotFoundOrServerError("GetCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
 		return
 	}
 

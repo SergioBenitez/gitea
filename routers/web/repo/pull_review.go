@@ -86,6 +86,22 @@ func CreateCodeComment(ctx *context.Context) {
 	if setting.Attachment.Enabled {
 		attachments = form.Files
 	}
+	replyReviewID := int64(0)
+	treePath := form.TreePath
+	if form.Reply != 0 {
+		parent, err := issues_model.GetCodeCommentWithRepoID(ctx, ctx.Repo.Repository.ID, form.Reply, ctx.Doer)
+		if err != nil {
+			ctx.NotFoundOrServerError("GetCodeCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
+			return
+		}
+		if parent.IssueID != issue.ID || parent.ReviewID == 0 {
+			ctx.NotFound(issues_model.ErrCommentNotExist{ID: form.Reply})
+			return
+		}
+		signedLine = parent.Line
+		treePath = parent.TreePath
+		replyReviewID = parent.ReviewID
+	}
 
 	comment, err := pull_service.CreateCodeComment(ctx,
 		ctx.Doer,
@@ -93,9 +109,9 @@ func CreateCodeComment(ctx *context.Context) {
 		issue,
 		signedLine,
 		form.Content,
-		form.TreePath,
+		treePath,
 		!form.SingleReview,
-		form.Reply,
+		replyReviewID,
 		form.LatestCommitID,
 		attachments,
 	)
@@ -121,19 +137,9 @@ func UpdateResolveConversation(ctx *context.Context) {
 	action := ctx.FormString("action")
 	commentID := ctx.FormInt64("comment_id")
 
-	comment, err := issues_model.GetCommentByID(ctx, commentID)
+	comment, err := issues_model.GetCodeCommentWithRepoID(ctx, ctx.Repo.Repository.ID, commentID, ctx.Doer)
 	if err != nil {
-		ctx.ServerError("GetIssueByID", err)
-		return
-	}
-
-	if err = comment.LoadIssue(ctx); err != nil {
-		ctx.ServerError("comment.LoadIssue", err)
-		return
-	}
-
-	if comment.Issue.RepoID != ctx.Repo.Repository.ID {
-		ctx.NotFound(errors.New("comment's repoID is incorrect"))
+		ctx.NotFoundOrServerError("GetCodeCommentWithRepoID", issues_model.IsErrCommentNotExist, err)
 		return
 	}
 

@@ -203,21 +203,27 @@ func (issue *Issue) LoadPullRequest(ctx context.Context) (err error) {
 }
 
 func (issue *Issue) loadComments(ctx context.Context) (err error) {
-	return issue.loadCommentsByType(ctx, CommentTypeUndefined)
+	return issue.loadCommentsByType(ctx, CommentTypeUndefined, optional.None[*user_model.User]())
 }
 
 // LoadDiscussComments loads discuss comments
 func (issue *Issue) LoadDiscussComments(ctx context.Context) error {
-	return issue.loadCommentsByType(ctx, CommentTypeComment)
+	return issue.loadCommentsByType(ctx, CommentTypeComment, optional.None[*user_model.User]())
 }
 
-func (issue *Issue) loadCommentsByType(ctx context.Context, tp CommentType) (err error) {
+// LoadCommentsVisibleToUser loads comments visible to user.
+func (issue *Issue) LoadCommentsVisibleToUser(ctx context.Context, user *user_model.User) error {
+	return issue.loadCommentsByType(ctx, CommentTypeUndefined, optional.Some(user))
+}
+
+func (issue *Issue) loadCommentsByType(ctx context.Context, tp CommentType, visibleToUser optional.Option[*user_model.User]) (err error) {
 	if issue.Comments != nil {
 		return nil
 	}
 	issue.Comments, err = FindComments(ctx, &FindCommentsOptions{
-		IssueID: issue.ID,
-		Type:    tp,
+		IssueID:       issue.ID,
+		Type:          tp,
+		VisibleToUser: visibleToUser,
 	})
 	for _, comment := range issue.Comments {
 		comment.Issue = issue

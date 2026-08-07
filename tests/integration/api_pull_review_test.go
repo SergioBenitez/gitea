@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 
 	auth_model "gitea.dev/models/auth"
@@ -18,6 +19,7 @@ import (
 	"gitea.dev/modules/git"
 	"gitea.dev/modules/json"
 	api "gitea.dev/modules/structs"
+	"gitea.dev/modules/timeutil"
 	issue_service "gitea.dev/services/issue"
 	pull_service "gitea.dev/services/pull"
 	"gitea.dev/tests"
@@ -423,7 +425,7 @@ func TestAPIPullReviewCommentResolveEndpoints(t *testing.T) {
 	plainComment, err := issue_service.CreateIssueComment(ctx, doer, repo, pullIssue, "not a review comment", nil)
 	require.NoError(t, err)
 	req = NewRequest(t, http.MethodPost, fmt.Sprintf("/api/v1/repos/%s/%s/pulls/comments/%d/resolve", repo.OwnerName, repo.Name, plainComment.ID)).AddTokenAuth(token)
-	MakeRequest(t, req, http.StatusBadRequest)
+	MakeRequest(t, req, http.StatusNotFound)
 
 	// Test permission check: use a user without write access for target repo to test 403 response
 	unauthorizedUser := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
@@ -543,15 +545,42 @@ func testAPIPullReviewCommentReply(t *testing.T) {
 	commitID, err := gitRepo.GetRefCommitID(t.Context(), pullIssue.PullRequest.GetGitHeadRefName())
 	require.NoError(t, err)
 
-	parent, err := pull_service.CreateCodeComment(t.Context(), doer, gitRepo, pullIssue, 1, "parent comment", "README.md", false, 0, commitID, nil)
+	parent, err := pull_service.CreateCodeComment(t.Context(), doer, gitRepo, pullIssue, 1, "private pending comment", "README.md", true, 0, commitID, nil)
 	require.NoError(t, err)
 	require.NotZero(t, parent.ReviewID)
 
 	repo := pullIssue.Repo
 	session := loginUser(t, doer.Name)
 	token := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteRepository)
-
 	url := fmt.Sprintf("/api/v1/repos/%s/%s/pulls/%d/comments/%d/replies", repo.OwnerName, repo.Name, pullIssue.Index, parent.ID)
+	webReplyURL := fmt.Sprintf("/%s/%s/pulls/%d/files/reviews/comments", repo.OwnerName, repo.Name, pullIssue.Index)
+	historyURL := fmt.Sprintf("/%s/%s/pulls/%d/content-history", repo.OwnerName, repo.Name, pullIssue.Index)
+	summaryBody := "private pending review summary"
+	require.NoError(t, db.Insert(t.Context(), &issues_model.Comment{Type: issues_model.CommentTypeReview, PosterID: doer.ID, IssueID: pullIssue.ID, ReviewID: parent.ReviewID, Content: summaryBody}))
+	now := timeutil.TimeStampNow()
+	require.NoError(t, issues_model.SaveIssueContentHistory(t.Context(), doer.ID, pullIssue.ID, parent.ID, now, parent.Content, true))
+	require.NoError(t, issues_model.SaveIssueContentHistory(t.Context(), doer.ID, pullIssue.ID, parent.ID, now.Add(1), "edited "+parent.Content, false))
+	hiddenHistory := unittest.AssertExistsAndLoadBean(t, &issues_model.ContentHistory{IssueID: pullIssue.ID, CommentID: parent.ID, IsFirstCreated: true})
+
+	reader := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 5})
+	readerSession := loginUser(t, reader.Name)
+	readerToken := getTokenForLoggedInUser(t, readerSession, auth_model.AccessTokenScopeWriteIssue, auth_model.AccessTokenScopeWriteRepository)
+	webReplyValues := map[string]string{
+		"origin": "diff", "content": "hidden reply", "side": "previous", "line": "99", "path": "untrusted", "single_review": "true",
+		"reply": strconv.FormatInt(parent.ID, 10), "latest_commit_id": commitID,
+	}
+	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, url, &api.CreatePullReviewCommentReplyOptions{Body: "hidden reply"}).AddTokenAuth(readerToken), http.StatusNotFound)
+	MakeRequest(t, NewRequestWithJSON(t, http.MethodPatch, fmt.Sprintf("/api/v1/repos/%s/%s/issues/comments/%d", repo.OwnerName, repo.Name, parent.ID), &api.EditIssueCommentOption{Body: "overwrite"}).AddTokenAuth(readerToken), http.StatusNotFound)
+	readerSession.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, webReplyURL, webReplyValues), http.StatusNotFound)
+	historyResp := readerSession.MakeRequest(t, NewRequestf(t, http.MethodGet, "%s/list?comment_id=%d", historyURL, parent.ID), http.StatusOK)
+	history := DecodeJSON(t, historyResp, &struct {
+		Results []map[string]any `json:"results"`
+	}{})
+	assert.Empty(t, history.Results)
+	missingHistoryResp := readerSession.MakeRequest(t, NewRequest(t, http.MethodGet, historyURL+"/detail?history_id=0"), http.StatusNotFound)
+	hiddenHistoryResp := readerSession.MakeRequest(t, NewRequestf(t, http.MethodGet, "%s/detail?history_id=%d", historyURL, hiddenHistory.ID), http.StatusNotFound)
+	assert.Equal(t, missingHistoryResp.Header().Get("Content-Type"), hiddenHistoryResp.Header().Get("Content-Type"))
+	assert.Equal(t, missingHistoryResp.Body.String(), hiddenHistoryResp.Body.String())
 
 	// happy path
 	req := NewRequestWithJSON(t, http.MethodPost, url, &api.CreatePullReviewCommentReplyOptions{Body: "the reply"}).AddTokenAuth(token)
@@ -560,6 +589,23 @@ func testAPIPullReviewCommentReply(t *testing.T) {
 	assert.Equal(t, "the reply", reply.Body)
 	assert.Equal(t, parent.ReviewID, reply.ReviewID)
 	assert.Equal(t, "README.md", reply.Path)
+
+	webReplyValues["content"] = "web reply"
+	req = NewRequestWithValues(t, http.MethodPost, webReplyURL, webReplyValues)
+	session.MakeRequest(t, req, http.StatusOK)
+	webReply := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ReviewID: parent.ReviewID, Content: "web reply"})
+	assert.Equal(t, parent.Line, webReply.Line)
+	assert.Equal(t, parent.TreePath, webReply.TreePath)
+
+	resp = MakeRequest(t, NewRequestf(t, http.MethodGet, "/api/v1/repos/%s/%s/issues/%d/timeline", repo.OwnerName, repo.Name, pullIssue.Index).AddTokenAuth(readerToken), http.StatusOK)
+	assert.NotContains(t, resp.Body.String(), summaryBody)
+	resp = readerSession.MakeRequest(t, NewRequestf(t, http.MethodGet, "/%s/%s/pulls/%d", repo.OwnerName, repo.Name, pullIssue.Index), http.StatusOK)
+	assert.NotContains(t, resp.Body.String(), summaryBody)
+	resp = readerSession.MakeRequest(t, NewRequest(t, http.MethodGet, historyURL+"/overview"), http.StatusOK)
+	overview := DecodeJSON(t, resp, &struct {
+		EditedHistoryCountMap map[string]int `json:"editedHistoryCountMap"`
+	}{})
+	assert.NotContains(t, overview.EditedHistoryCountMap, strconv.FormatInt(parent.ID, 10))
 
 	// empty body — caught by binding
 	req = NewRequestWithJSON(t, http.MethodPost, url, &api.CreatePullReviewCommentReplyOptions{}).AddTokenAuth(token)

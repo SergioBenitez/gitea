@@ -9,6 +9,7 @@ import (
 
 	"gitea.dev/models/avatars"
 	"gitea.dev/models/db"
+	user_model "gitea.dev/models/user"
 	"gitea.dev/modules/log"
 	"gitea.dev/modules/timeutil"
 	"gitea.dev/modules/util"
@@ -107,17 +108,20 @@ func KeepLimitedContentHistory(ctx context.Context, issueID, commentID int64, li
 
 // QueryIssueContentHistoryEditedCountMap query related history count of each comment (comment_id = 0 means the main issue)
 // only return the count map for "edited" (history revision count > 1) issues or comments.
-func QueryIssueContentHistoryEditedCountMap(dbCtx context.Context, issueID int64) (map[int64]int, error) {
+func QueryIssueContentHistoryEditedCountMap(dbCtx context.Context, issueID int64, user *user_model.User) (map[int64]int, error) {
 	type HistoryCountRecord struct {
 		CommentID    int64
 		HistoryCount int
 	}
 	records := make([]*HistoryCountRecord, 0)
 
-	err := db.GetEngine(dbCtx).Select("comment_id, COUNT(1) as history_count").
-		Table("issue_content_history").
-		Where(builder.Eq{"issue_id": issueID}).
-		GroupBy("comment_id").
+	visibilityCond := builder.Eq{"h.comment_id": 0}.
+		Or(builder.NotNull{"comment.id"}.And(commentVisibleToUserCondition(user)))
+	err := db.GetEngine(dbCtx).Select("h.comment_id, COUNT(1) as history_count").
+		Table([]string{"issue_content_history", "h"}).
+		Join("LEFT", "comment", "comment.id = h.comment_id AND comment.issue_id = h.issue_id").
+		Where(builder.Eq{"h.issue_id": issueID}.And(visibilityCond)).
+		GroupBy("h.comment_id").
 		Having("count(1) > 1").
 		Find(&records)
 	if err != nil {
@@ -146,14 +150,18 @@ type IssueContentListItem struct {
 }
 
 // FetchIssueContentHistoryList fetch list
-func FetchIssueContentHistoryList(dbCtx context.Context, issueID, commentID int64) ([]*IssueContentListItem, error) {
+func FetchIssueContentHistoryList(dbCtx context.Context, issueID, commentID int64, user *user_model.User) ([]*IssueContentListItem, error) {
 	res := make([]*IssueContentListItem, 0)
-	err := db.GetEngine(dbCtx).Select("u.id as user_id, u.name as user_name, u.full_name as user_full_name,"+
+	sess := db.GetEngine(dbCtx).Select("u.id as user_id, u.name as user_name, u.full_name as user_full_name,"+
 		"h.id as history_id, h.edited_unix, h.is_first_created, h.is_deleted").
 		Table([]string{"issue_content_history", "h"}).
 		Join("LEFT", []string{"user", "u"}, "h.poster_id = u.id").
-		Where(builder.Eq{"issue_id": issueID, "comment_id": commentID}).
-		OrderBy("edited_unix DESC").
+		Where(builder.Eq{"h.issue_id": issueID, "h.comment_id": commentID})
+	if commentID != 0 {
+		sess.Join("INNER", "comment", "comment.id = h.comment_id AND comment.issue_id = h.issue_id")
+		sess.And(commentVisibleToUserCondition(user))
+	}
+	err := sess.OrderBy("edited_unix DESC").
 		Find(&res)
 	if err != nil {
 		log.Error("can not fetch issue content history list. err=%v", err)
